@@ -1,0 +1,81 @@
+# Data file name variables
+train_id3=pd.read_csv( basePath + "id3-train.dat", delim_whitespace="/t")
+test_id3=pd.read_csv( basePath + "id3-test.dat", delim_whitespace="/t")
+
+def entropy(probs):
+  return sum([-prob*log(prob+.001,2) for prob in probs])
+
+def entropy_list(data):
+  counts=Counter(x for x in data)
+  num_inst=len(data)
+  #print(f'Number of Instances of Current Sub Class is:{num_inst}')
+  probs= [x/num_inst for x in counts.values()]
+  return entropy(probs)
+
+def information_gained(data,split,target,trace=0):
+  split = data.groupby(split)
+  nobs = len(data.index)
+  agg_ent = split.agg({target:[entropy_list, lambda x: len(x)/nobs]})[target]
+  agg_ent.columns = ['Entropy', 'PropObservations']
+  new_entropy = sum(agg_ent['Entropy'] * agg_ent['PropObservations'])
+  old_entropy = entropy_list(data[target])
+  return old_entropy - new_entropy
+  
+def ID3(data,target,attribute,default_class=None):
+   count = data[target]
+   class_ratio = count.sum()/len(count)
+   if len(count)==1 or class_ratio==1 or class_ratio==0:
+    return count.iloc[0]
+   elif data.empty or class_ratio==.5:
+     return default_class
+   elif len(attribute)==0:
+     return count.mode().iloc[0]
+   else:
+     info_gain=[information_gained(data,att,target) for att in attribute]
+     index_max=info_gain.index(max(info_gain))
+     best_att=attribute[index_max]
+     tree ={best_att:{}}
+     remaining_attributes=[i for i in attribute if i != best_att]
+     for att_val,data_sub in data.groupby(best_att):
+       subtree= ID3(data_sub,target,remaining_attributes,default_class)
+       tree[best_att][att_val]=subtree
+     return tree
+ 
+#print out tree
+test_attribute_names = list(test_id3.columns)
+test_attribute_names.remove('class') 
+tree=ID3(train_id3,'class',train_attribute_names,train_id3['class'].mode().iloc[0])
+pprint(tree)
+
+
+
+train_id3['predicted']=train_id3.apply(classify,axis=1,args=(tree,0))
+test_id3['predicted'] = test_id3.apply(classify, axis=1, args=(tree,0))
+print(f'Accuracy for train data is: ' + str(100*sum(train_id3['class']==train_id3['predicted'])/(len(train_id3.index))))
+print(f'Accuracy for test data is is: ' + str(100*sum(test_id3['class']==test_id3['predicted'])/(len(test_id3.index))))
+#Accuracy for train data is: 89.375
+#Accuracy for test data is is: 87.19211822660098
+
+x=[]
+y=[]
+for i in range(40,len(train_id3)+1,40):
+  sample=train_id3.sample(n=i)
+  x.append(i)
+  tree=ID3(sample,'class',train_attribute_names,sample['class'].mode().iloc[0])
+  test_id3['predicted'] = test_id3.apply(classify, axis=1, args=(tree,0))
+  y.append((sum(test_id3['class']==test_id3['predicted'])/(len(test_id3.index))))
+
+
+#graph learning curve 
+#loops through to select 'x' instances in the increments of 40 (i.e. 40, 80, 120, and so on). 
+#for each selected number 'x', randomly picks the example instances from the training data and calls the ID3
+
+f, ax = plt.subplots(figsize = (15,10))
+ax.set_title("Test Set Accuracy ")
+ax.set_xlabel("Number of Samples")
+ax.set_ylabel("Accuracy (%)")
+ax.xaxis.label.set_color('black')
+ax.yaxis.label.set_color('black')
+ax.tick_params(colors='black',)
+ax.set_xticks(np.arange(40,801,40))
+plt.plot(x, y, color='black', marker='o')
